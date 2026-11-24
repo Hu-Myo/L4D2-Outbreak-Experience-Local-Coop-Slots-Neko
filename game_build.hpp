@@ -43,11 +43,20 @@ struct CreditsOffsets {
     std::size_t characterCall;
 };
 
+struct PassingOffsets {
+    std::size_t characterLookup;
+    std::size_t spawnNpcCall;
+    std::size_t duplicateCheckCall;
+    std::size_t spawnedNpcLookupCall;
+    std::size_t namedTargetLookupCall;
+};
+
 struct GameBuild {
     const char* name;
     EngineOffsets engine;
     ServerOffsets server;
     CreditsOffsets credits;
+    PassingOffsets passing;
 };
 
 inline constexpr GameBuild kSteam26770911{
@@ -61,6 +70,7 @@ inline constexpr GameBuild kSteam26770911{
      0x60C904, 0x68EA2C},
     {"4d01ed9fb856d57ce549b8587c386f361083ee581b001295fac0eff4c835d52d",
      0x286600, 0x286650, 0x286710, {0x2C1827, 0x2C2C9E, 0x2C2EF1, 0x2C327B}, 0x2C32D1, 0x2C33F5},
+    {0x305630, 0x29AADB, 0x26CEA8, 0x29AAE7, 0xB4F9E},
 };
 
 inline constexpr GameBuild kPreviousBuild{
@@ -74,6 +84,7 @@ inline constexpr GameBuild kPreviousBuild{
      0x60C904, 0x68E9D4},
     {"c0a8e1e88f7312db11bcfd4b0ec574d224a34b2d9a615d6088b28335eeb4af1f",
      0x286530, 0x286580, 0x286640, {0x2C1757, 0x2C2BCE, 0x2C2E21, 0x2C31AB}, 0x2C3201, 0x2C3325},
+    {},
 };
 
 }  // namespace coop_slots

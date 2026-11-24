@@ -17,6 +17,8 @@
 #include <cwchar>
 
 #include "game_build.hpp"
+#include "game_abi.hpp"
+#include "game_abi_anchors.hpp"
 
 #if !defined(_M_IX86)
 #error Use the x86 toolchain for the Source game server modules.
@@ -27,7 +29,9 @@ namespace {
 constexpr int kStockLimit = 4;
 constexpr int kLargestLimit = 8;
 constexpr int kSurvivorTeam = 2;
-constexpr char kPluginVersion[] = "0.1.4-test";
+constexpr int kPassingNpcTeam = 4;
+constexpr char kPluginVersion[] = "0.1.6-test";
+constexpr char kCvarHash[] = "37d0c98ddfe7fa199d741dfc24526eb435f71f66d2d0e3d0500c4c1be33cb6c5";
 
 // Instance layouts shared by the verified game builds.
 constexpr std::size_t kServerState = 4;
@@ -50,10 +54,12 @@ using FactoryFn = void*(__cdecl*)(const char*, int*);
 using FindVarFn = void*(__thiscall*)(void*, const char*);
 using PlayerByIndexFn = void*(__cdecl*)(int);
 using AddSurvivorFn = void(__thiscall*)(void*, int);
+using CharacterLookupFn = void*(__cdecl*)(int);
 
 std::uint8_t* g_engine = nullptr;
 std::uint8_t* g_server = nullptr;
 const coop_slots::GameBuild* g_build = nullptr;
+bool g_structuralServer = false;
 FactoryFn g_cvarFactory = nullptr;
 void* g_playerInfoManager = nullptr;
 std::atomic<void*> g_activeRules{nullptr};
@@ -85,6 +91,9 @@ int g_sessionLimit = kStockLimit;
 bool g_playableLevel = false;
 bool g_waitForActivation = false;
 unsigned g_mapEpoch = 0;
+bool g_passingInstalled = false;
+bool g_passingCoop = false;
+thread_local bool g_spawningPassingNpc = false;
 
 template <typename T>
 T Read(const void* base, std::size_t offset) {
@@ -125,7 +134,7 @@ void Log(const char* format, ...) {
     std::fclose(file);
 }
 
-bool MatchesHash(HMODULE module, const char* expected) {
+bool FileDigest(HMODULE module, coop_slots::Sha256& digest) {
     wchar_t path[MAX_PATH];
     const auto length = GetModuleFileNameW(module, path, MAX_PATH);
     if (!length || length >= MAX_PATH) return false;
@@ -134,7 +143,6 @@ bool MatchesHash(HMODULE module, const char* expected) {
     if (_wfopen_s(&file, path, L"rb") != 0) return false;
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
-    std::array<UCHAR, 32> digest{};
     bool ok = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
               BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) == 0;
     std::array<UCHAR, 64 * 1024> buffer;
@@ -143,16 +151,18 @@ bool MatchesHash(HMODULE module, const char* expected) {
         if (!size) break;
         ok = BCryptHashData(hash, buffer.data(), static_cast<ULONG>(size), 0) == 0;
     }
-    ok = ok && !std::ferror(file) && BCryptFinishHash(hash, digest.data(), digest.size(), 0) == 0;
+    ok = ok && !std::ferror(file) &&
+         BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) == 0;
     if (hash) BCryptDestroyHash(hash);
     if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
     std::fclose(file);
 
-    constexpr char hex[] = "0123456789abcdef";
-    for (std::size_t i = 0; ok && i < digest.size(); ++i) {
-        ok = expected[i * 2] == hex[digest[i] >> 4] && expected[i * 2 + 1] == hex[digest[i] & 15];
-    }
     return ok;
+}
+
+bool MatchesHash(HMODULE module, const char* expected) {
+    coop_slots::Sha256 digest{};
+    return FileDigest(module, digest) && coop_slots::DigestMatches(digest, expected);
 }
 
 // L4D1 campaigns use 0–3 for their original cast. This plugin puts their
@@ -188,8 +198,8 @@ const char* __cdecl ResolveCreditsFallbackName(int character) {
     return guest >= 0 ? names[guest] : reinterpret_cast<CreditNameFn>(g_creditsClient + g_build->credits.fallbackName)(character);
 }
 
-bool WriteCreditsCall(std::size_t call, std::uintptr_t target) {
-    auto* const operand = g_creditsClient + call + 1;
+bool WriteRelativeCall(std::uint8_t* module, std::size_t call, std::uintptr_t target) {
+    auto* const operand = module + call + 1;
     DWORD protection;
     if (!VirtualProtect(operand, sizeof(std::uint32_t), PAGE_EXECUTE_READWRITE, &protection)) return false;
     const auto displacement = static_cast<std::uint32_t>(target - reinterpret_cast<std::uintptr_t>(operand + 4));
@@ -200,17 +210,35 @@ bool WriteCreditsCall(std::size_t call, std::uintptr_t target) {
     return true;
 }
 
+struct RelativeCall {
+    std::size_t offset;
+    std::size_t original;
+    std::uintptr_t replacement;
+};
+
+template <std::size_t Count>
+bool InstallRelativeCalls(std::uint8_t* module, const RelativeCall (&calls)[Count]) {
+    for (const auto& call : calls) {
+        const auto expected = static_cast<std::uint32_t>(call.original - (call.offset + 5));
+        if (module[call.offset] != 0xE8 || Read<std::uint32_t>(module, call.offset + 1) != expected) return false;
+    }
+
+    for (std::size_t i = 0; i < Count; ++i) {
+        if (WriteRelativeCall(module, calls[i].offset, calls[i].replacement)) continue;
+        while (i > 0) {
+            const auto& patched = calls[--i];
+            WriteRelativeCall(module, patched.offset, reinterpret_cast<std::uintptr_t>(module + patched.original));
+        }
+        return false;
+    }
+    return true;
+}
+
 bool InstallCreditsNames() {
-    // These calls belong only to CStatsCrawl. Its stat records and the shared
-    // character helpers used during gameplay retain their original behavior.
-    struct Call {
-        std::size_t offset;
-        std::size_t original;
-        std::uintptr_t replacement;
-    };
+    // These calls belong only to CStatsCrawl.
     const auto resolveName = reinterpret_cast<std::uintptr_t>(&ResolveCreditsName);
     const auto& credits = g_build->credits;
-    const Call calls[]{
+    const RelativeCall calls[]{
         {credits.nameCalls[0], credits.nameToken, resolveName},
         {credits.nameCalls[1], credits.nameToken, resolveName},
         {credits.nameCalls[2], credits.nameToken, resolveName},
@@ -218,31 +246,23 @@ bool InstallCreditsNames() {
         {credits.fallbackCall, credits.fallbackName, reinterpret_cast<std::uintptr_t>(&ResolveCreditsFallbackName)},
         {credits.characterCall, credits.character, reinterpret_cast<std::uintptr_t>(&ResolveCreditsCharacter)},
     };
-    for (const auto& call : calls) {
-        const auto expected = static_cast<std::uint32_t>(call.original - (call.offset + 5));
-        if (g_creditsClient[call.offset] != 0xE8 ||
-            Read<std::uint32_t>(g_creditsClient, call.offset + 1) != expected) return false;
-    }
-
-    for (std::size_t i = 0; i < std::size(calls); ++i) {
-        if (WriteCreditsCall(calls[i].offset, calls[i].replacement)) continue;
-        while (i > 0) {
-            const auto& patched = calls[--i];
-            WriteCreditsCall(patched.offset, reinterpret_cast<std::uintptr_t>(g_creditsClient + patched.original));
-        }
-        return false;
-    }
-    return true;
+    return InstallRelativeCalls(g_creditsClient, calls);
 }
 
 bool g_creditsInstalled = false;
+
+bool SupportsCredits(HMODULE client) {
+    return MatchesHash(client, g_build->credits.hash) ||
+           (g_build == &coop_slots::kSteam26770911 &&
+            coop_slots::MatchesAbi(client, coop_slots::kCreditsAnchors, coop_slots::kCreditsDigest));
+}
 
 void PrepareCreditsNames() {
     if (g_creditsAttempted) return;
     const auto client = GetModuleHandleW(L"client.dll");
     if (!client) return;
     g_creditsAttempted = true;
-    if (MatchesHash(client, g_build->credits.hash)) {
+    if (SupportsCredits(client)) {
         g_creditsClient = reinterpret_cast<std::uint8_t*>(client);
         g_creditsInstalled = InstallCreditsNames();
     }
@@ -313,11 +333,73 @@ bool IsBot(void* info) {
     return info && Method<IsFakeClientFn>(info, 11)(info);
 }
 
-Survivors GetSurvivors() {
-    Survivors team;
+int MaxServerClients() {
     const auto* globals = Read<void*>(g_server, g_build->server.globals);
     const int maxClients = globals ? Read<int>(globals, 0x14) : 0;
-    if (maxClients < kStockLimit || maxClients > 64) return team;
+    return maxClients >= kStockLimit && maxClients <= 64 ? maxClients : 0;
+}
+
+bool IsPassingChapter(const char* map) {
+    return map && (_stricmp(map, "c6m1_riverbank") == 0 || _stricmp(map, "c6m3_port") == 0);
+}
+
+void* FindPassingNpc(int identity) {
+    const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + g_build->server.playerByIndex);
+    const int maxClients = MaxServerClients();
+    for (int index = 1; index <= maxClients; ++index) {
+        void* player = byIndex(index);
+        if (player && Read<int>(player, 0x238) == kPassingNpcTeam &&
+            Read<int>(player, 0x2BB4) == identity && IsBot(PlayerInfo(player))) return player;
+    }
+    return nullptr;
+}
+
+void* FindStockCharacter(int identity) {
+    return reinterpret_cast<CharacterLookupFn>(g_server + g_build->passing.characterLookup)(identity);
+}
+
+bool IsPassingNpcIdentity(int identity) {
+    return identity >= 5 && identity <= 7;
+}
+
+void* __cdecl FindExistingSpawnNpc(int identity) {
+    if (g_passingCoop && g_spawningPassingNpc && IsPassingNpcIdentity(identity)) return FindPassingNpc(identity);
+    return FindStockCharacter(identity);
+}
+
+void* __cdecl FindPassingMapTarget(int identity) {
+    if (g_passingCoop && IsPassingNpcIdentity(identity)) return FindPassingNpc(identity);
+    return FindStockCharacter(identity);
+}
+
+void __fastcall SpawnPassingNpc(void* director, void*, int identity) {
+    const bool previous = g_spawningPassingNpc;
+    g_spawningPassingNpc = g_passingCoop && IsPassingNpcIdentity(identity);
+    reinterpret_cast<AddSurvivorFn>(g_server + g_build->server.addSurvivor)(director, identity);
+    g_spawningPassingNpc = previous;
+}
+
+bool InstallPassingNpcRouting() {
+    // Only the map NPC spawner, its duplicate check, and !character map targets
+    // need a team-4 lookup. Ordinary gameplay still uses the native lookup.
+    const auto& passing = g_build->passing;
+    if (!passing.characterLookup) return false;
+    if (g_structuralServer &&
+        !coop_slots::MatchesAbi(reinterpret_cast<HMODULE>(g_server), coop_slots::kPassingAnchors,
+                               coop_slots::kPassingDigest)) return false;
+    const auto mapTarget = reinterpret_cast<std::uintptr_t>(&FindPassingMapTarget);
+    const RelativeCall calls[]{
+        {passing.spawnNpcCall, g_build->server.addSurvivor, reinterpret_cast<std::uintptr_t>(&SpawnPassingNpc)},
+        {passing.duplicateCheckCall, passing.characterLookup, reinterpret_cast<std::uintptr_t>(&FindExistingSpawnNpc)},
+        {passing.spawnedNpcLookupCall, passing.characterLookup, mapTarget},
+        {passing.namedTargetLookupCall, passing.characterLookup, mapTarget},
+    };
+    return InstallRelativeCalls(g_server, calls);
+}
+
+Survivors GetSurvivors() {
+    Survivors team;
+    const int maxClients = MaxServerClients();
 
     const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + g_build->server.playerByIndex);
     using UserIdFn = int(__thiscall*)(void*);
@@ -358,6 +440,7 @@ void StopMap() {
     g_map = {};
     g_waitForActivation = false;
     g_playableLevel = false;
+    g_passingCoop = false;
 }
 
 bool ApplyLimit(int requested, bool newChapter) {
@@ -465,8 +548,16 @@ int __fastcall RulesLimit(void* self, void*) {
 
 bool __fastcall LevelInit(void* self, void*, const char* map, const char* entities, const char* oldMap,
                           const char* landmark, bool loadGame, bool background) {
+    g_passingCoop = false;
+    if (!background && IsPassingChapter(map) && !Read<bool>(LocalServer(), kDedicated) && IsCoop()) {
+        if (!g_passingInstalled) g_passingInstalled = InstallPassingNpcRouting();
+        g_passingCoop = g_passingInstalled;
+        Log(g_passingCoop ? "Passing NPC routing enabled for %s." :
+                            "Passing NPC hooks unavailable for %s; kept stock lookups.", map);
+    }
     const bool levelReady = reinterpret_cast<LevelInitFn>(g_server + g_build->server.levelInit)(
         self, map, entities, oldMap, landmark, loadGame, background);
+    if (!levelReady) g_passingCoop = false;
     g_playableLevel = levelReady && !background;
     return levelReady;
 }
@@ -672,11 +763,54 @@ bool InstallHooks() {
     return true;
 }
 
-const coop_slots::GameBuild* FindGameBuild(HMODULE engine, HMODULE server) {
-    for (const auto* build : {&coop_slots::kSteam26770911, &coop_slots::kPreviousBuild}) {
-        if (MatchesHash(engine, build->engine.hash) && MatchesHash(server, build->server.hash)) return build;
-    }
-    return nullptr;
+struct BuildMatch {
+    const coop_slots::GameBuild* profile;
+    bool structuralServer;
+    bool structuralEngine;
+    const char* failure;
+};
+
+BuildMatch FindGameBuild(HMODULE engine, HMODULE server) {
+    using namespace coop_slots;
+    Sha256 engineHash{}, serverHash{};
+    const bool hasEngineHash = FileDigest(engine, engineHash);
+    const bool hasServerHash = FileDigest(server, serverHash);
+    if (hasEngineHash && hasServerHash && DigestMatches(engineHash, kPreviousBuild.engine.hash) &&
+        DigestMatches(serverHash, kPreviousBuild.server.hash)) return {&kPreviousBuild, false, false, nullptr};
+
+    const auto& profile = kSteam26770911;
+    const bool knownEngine = hasEngineHash && DigestMatches(engineHash, profile.engine.hash);
+    const bool knownServer = hasServerHash && DigestMatches(serverHash, profile.server.hash);
+    if (!knownEngine &&
+        (!HasImageAccess(engine, profile.engine.localServer, kServerSlots + sizeof(int), ImageAccess::Write) ||
+         !HasImageAccess(engine, profile.engine.matchFramework, sizeof(void*), ImageAccess::Write) ||
+         !MatchesAbi(engine, kEngineAnchors, kEngineDigest))) return {nullptr, false, false, "engine"};
+
+    if (!knownServer &&
+        (!HasImageAccess(server, profile.server.gameRules, sizeof(void*), ImageAccess::Write) ||
+         !HasImageAccess(server, profile.server.director, sizeof(void*), ImageAccess::Write) ||
+         !HasImageAccess(server, profile.server.globals, 2 * sizeof(void*) + sizeof(int), ImageAccess::Write) ||
+         !MatchesAbi(server, kServerAnchors, kServerDigest) ||
+         !MatchesAbi(server, kPassingAnchors, kPassingDigest))) return {nullptr, false, false, "server"};
+
+    return {&profile, !knownServer, !knownEngine, nullptr};
+}
+
+bool MatchFactory(HMODULE module, FARPROC factory, std::size_t entry) {
+    return reinterpret_cast<std::uintptr_t>(factory) == reinterpret_cast<std::uintptr_t>(module) + entry;
+}
+
+bool HasCompatibleCvar(HMODULE module, FARPROC factory, bool knownHash) {
+    return knownHash ||
+           (MatchFactory(module, factory, 0x10D30) &&
+            coop_slots::MatchesAbi(module, coop_slots::kCvarAnchors, coop_slots::kCvarDigest));
+}
+
+bool IsVerifiedCvarInterface(HMODULE module, const void* object) {
+    const auto* base = reinterpret_cast<const std::uint8_t*>(module);
+    return object == base + 0x2C0D0 &&
+           coop_slots::HasImageAccess(module, 0x2C0D0, sizeof(void*), coop_slots::ImageAccess::Write) &&
+           Read<const void*>(object, 0) == base + 0x207AC;
 }
 
 DWORD WINAPI Start(void*) {
@@ -685,21 +819,42 @@ DWORD WINAPI Start(void*) {
         const auto server = GetModuleHandleW(L"server.dll");
         const auto cvar = GetModuleHandleW(L"vstdlib.dll");
         if (engine && server && cvar) {
-            g_build = FindGameBuild(engine, server);
-            if (!g_build ||
-                !MatchesHash(cvar, "37d0c98ddfe7fa199d741dfc24526eb435f71f66d2d0e3d0500c4c1be33cb6c5")) {
-                Log("Module hash mismatch. Kept stock game behavior.");
+            const auto match = FindGameBuild(engine, server);
+            if (!match.profile) {
+                Log("%s.dll compatibility check failed. Kept stock game behavior.", match.failure);
                 return 0;
             }
+            const auto cvarEntry = GetProcAddress(cvar, "CreateInterface");
+            const auto serverEntry = GetProcAddress(server, "CreateInterface");
+            const bool knownCvar = MatchesHash(cvar, kCvarHash);
+            if (!HasCompatibleCvar(cvar, cvarEntry, knownCvar)) {
+                Log("vstdlib.dll compatibility check failed. Kept stock game behavior.");
+                return 0;
+            }
+            if (match.structuralServer && !MatchFactory(server, serverEntry, 0x501DF0)) {
+                Log("server.dll interface factory moved. Kept stock game behavior.");
+                return 0;
+            }
+            g_build = match.profile;
+            g_structuralServer = match.structuralServer;
             g_engine = reinterpret_cast<std::uint8_t*>(engine);
             g_server = reinterpret_cast<std::uint8_t*>(server);
 #pragma warning(suppress : 4191)
-            g_cvarFactory = reinterpret_cast<FactoryFn>(GetProcAddress(cvar, "CreateInterface"));
+            g_cvarFactory = reinterpret_cast<FactoryFn>(cvarEntry);
 #pragma warning(suppress : 4191)
-            const auto serverFactory = reinterpret_cast<FactoryFn>(GetProcAddress(server, "CreateInterface"));
+            const auto serverFactory = reinterpret_cast<FactoryFn>(serverEntry);
             g_playerInfoManager = serverFactory ? serverFactory("PlayerInfoManager002", nullptr) : nullptr;
-            if (g_cvarFactory && g_playerInfoManager && InstallHooks()) {
-                Log("%s recognized. Waiting for a locally hosted campaign.", g_build->name);
+            if (g_cvarFactory && g_playerInfoManager &&
+                (!match.structuralServer || g_playerInfoManager == g_server + 0x7829C0) &&
+                (knownCvar || IsVerifiedCvarInterface(cvar, g_cvarFactory("VEngineCvar007", nullptr))) &&
+                InstallHooks()) {
+                if (match.structuralEngine || match.structuralServer || !knownCvar) {
+                    Log("Local co-op ABI matched %s (engine: %s, server: %s, vstdlib: %s).",
+                        g_build->name, match.structuralEngine ? "anchors" : "hash",
+                        match.structuralServer ? "anchors" : "hash", knownCvar ? "hash" : "anchors");
+                } else {
+                    Log("%s recognized. Waiting for a locally hosted campaign.", g_build->name);
+                }
             } else {
                 Log("Engine entry points did not match.");
             }
