@@ -6,6 +6,10 @@ Change the survivor limit from four to eight in a Left 4 Dead 2 co-op campaign y
 
 **[Download 0.1.3-test](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.3-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.3-test.zip)**
 
+> **Account and server restriction notice:** This DLL modifies the game at runtime. The author cannot guarantee that using it will not result in game/server restrictions or account bans. To the extent permitted by law, the author accepts no responsibility for such penalties. Use it only if you accept these risks of restrictions or bans.
+
+[Responsibility for original and modified versions](RESPONSIBILITY.md)
+
 ## Install and use
 
 1. Install [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615) using the author's instructions. This build was tested with Windows L4D2 2.2.4.3 and Left4Neko 2.51.0.

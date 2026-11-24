@@ -6,6 +6,10 @@
 
 **[0.1.3-test 다운로드](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.3-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.3-test.zip)**
 
+> **이용 제한·계정 정지 안내:** 이 DLL은 게임 실행 중 동작을 변경합니다. 사용으로 인해 게임·서버 이용 제한이나 계정 정지가 발생하지 않는다고 보장할 수 없습니다. 관련 법률이 허용하는 범위에서 제작자는 이러한 제재에 대해 책임지지 않습니다. 이러한 이용 제한·계정 정지 위험을 이해한 뒤 본인의 판단으로 사용해 주세요.
+
+[원본과 수정판의 책임 범위](RESPONSIBILITY.ko.md)
+
 ## 설치 및 사용
 
 1. 제작자 안내에 따라 [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615)을 설치합니다. 이 빌드는 Windows판 L4D2 2.2.4.3과 Left4Neko 2.51.0에서 테스트했습니다.
