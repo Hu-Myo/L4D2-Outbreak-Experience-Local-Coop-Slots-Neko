@@ -12,6 +12,10 @@ Change the survivor limit from four to eight in a Left 4 Dead 2 co-op campaign y
 2. Close the game. Extract the release ZIP and place `NekoLocalCoopSlots.dll` at `<Left 4 Dead 2>/bin/neko/plugins/NekoLocalCoopSlots.dll`. Back up any existing copy before replacing it.
 3. Host a local co-op campaign. After the map loads, enter `l4n_menu` in the game console. Open **L4N Plugins**, select **Local Co-op Player Count**, and choose four to eight survivors. If the game language is Korean, this menu is labeled **로컬 협동 인원수**. All other game languages use the English labels.
 
+### Optional teammate HUD
+
+Install the [Extra Survivor HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test) alongside this plugin to show portraits and health bars for the additional teammates.
+
 ## What changes in a campaign
 
 - The host's selection carries over to later chapters in the same campaign. Regular lobbies start with four slots, and an eight-seat lobby request sets the local host limit to eight when supported.

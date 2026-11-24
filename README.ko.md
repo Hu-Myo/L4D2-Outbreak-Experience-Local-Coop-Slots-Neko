@@ -12,6 +12,10 @@
 2. 게임을 종료합니다. 릴리스 ZIP을 풀고 `NekoLocalCoopSlots.dll`을 `<Left 4 Dead 2>/bin/neko/plugins/NekoLocalCoopSlots.dll`에 넣습니다. 기존 DLL이 있으면 교체 전에 백업합니다.
 3. 로컬 협동 캠페인을 직접 호스트합니다. 맵이 로드되면 콘솔에 `l4n_menu`를 입력하고 **L4N 플러그인**에서 인원수 메뉴를 열어 4~8명 중 하나를 선택합니다. 게임 언어가 한국어일 때는 **로컬 협동 인원수**, 그 외에는 **Local Co-op Player Count**로 표시됩니다.
 
+### 선택 사항 · 추가 생존자 HUD
+
+[추가 생존자 HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test)도 함께 설치하면 인원수를 늘렸을 때 추가된 팀원의 초상화와 체력 바를 HUD에 표시할 수 있습니다.
+
 ## 캠페인에서 달라지는 점
 
 - 같은 캠페인의 다음 챕터에도 선택한 정원이 적용됩니다. 일반 로비는 4명으로 시작합니다. 8인 로비 요청을 받으면 해당 로컬 서버가 지원하는 경우 8명으로 맞춥니다.
