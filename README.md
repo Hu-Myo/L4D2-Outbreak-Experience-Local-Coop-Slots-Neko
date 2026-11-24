@@ -4,13 +4,13 @@
 
 Change the survivor limit from four to eight in a Left 4 Dead 2 co-op campaign you host. The plugin adds a player-count menu to Neko and fills empty survivor slots with bots.
 
-**[Download 0.1.2-test](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.2-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.2-test.zip)**
+**[Download 0.1.3-test](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.3-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.3-test.zip)**
 
 ## Install and use
 
 1. Install [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615) using the author's instructions. This build was tested with Windows L4D2 2.2.4.3 and Left4Neko 2.51.0.
 2. Close the game. Extract the release ZIP and place `NekoLocalCoopSlots.dll` at `<Left 4 Dead 2>/bin/neko/plugins/NekoLocalCoopSlots.dll`. Back up any existing copy before replacing it.
-3. Host a local co-op campaign. After the map loads, enter `l4n_menu` in the game console. Open **L4N Plugins**, select **로컬 협동 인원수** (Local Co-op Player Count), and choose four to eight survivors.
+3. Host a local co-op campaign. After the map loads, enter `l4n_menu` in the game console. Open **L4N Plugins**, select **Local Co-op Player Count**, and choose four to eight survivors. If the game language is Korean, this menu is labeled **로컬 협동 인원수**. All other game languages use the English labels.
 
 ## What changes in a campaign
 

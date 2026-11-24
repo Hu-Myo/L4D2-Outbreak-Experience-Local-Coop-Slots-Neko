@@ -25,6 +25,7 @@ namespace {
 constexpr int kStockLimit = 4;
 constexpr int kLargestLimit = 8;
 constexpr int kSurvivorTeam = 2;
+constexpr char kPluginVersion[] = "0.1.3-test";
 
 // RVAs and layouts verified against the three module hashes checked at startup.
 constexpr std::size_t kGameRules = 0x7F7F6C;
@@ -117,8 +118,8 @@ void Log(const char* format, ...) {
     if (_wfopen_s(&file, path, L"a") != 0) return;
     SYSTEMTIME now;
     GetLocalTime(&now);
-    std::fprintf(file, "%04u-%02u-%02u %02u:%02u:%02u [0.1.2-test] ",
-                 now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+    std::fprintf(file, "%04u-%02u-%02u %02u:%02u:%02u [%s] ",
+                 now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, kPluginVersion);
     va_list args;
     va_start(args, format);
     std::vfprintf(file, format, args);
@@ -705,7 +706,40 @@ DWORD WINAPI Start(void*) {
     return 0;
 }
 
-constexpr char kTitle[] = u8"로컬 협동 인원수";
+bool IsKoreanLanguage(const char* language) noexcept {
+    return language && (_stricmp(language, "koreana") == 0 || _stricmp(language, "korean") == 0);
+}
+
+bool UseKoreanMenu() noexcept {
+    // Use the effective game UI language, including an explicit game override.
+    __try {
+        const auto* variable = g_cvarFactory ? FindConVar("cl_language") : nullptr;
+        const auto* language = variable ? Read<const char*>(variable, kConVarString) : nullptr;
+        if (language && *language) return IsKoreanLanguage(language);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // Try the game's Steam language when the client value is unavailable.
+    }
+
+    const auto steam = GetModuleHandleW(L"steam_api.dll");
+    if (!steam) return false;
+    using AppsFn = void* (__cdecl*)();
+    using LanguageFn = const char* (__cdecl*)(void*);
+#pragma warning(suppress : 4191)
+    const auto apps = reinterpret_cast<AppsFn>(GetProcAddress(steam, "SteamAPI_SteamApps_v008"));
+#pragma warning(suppress : 4191)
+    const auto language = reinterpret_cast<LanguageFn>(GetProcAddress(steam, "SteamAPI_ISteamApps_GetCurrentGameLanguage"));
+    if (!apps || !language) return false;
+    __try {
+        void* instance = apps();
+        return instance && IsKoreanLanguage(language(instance));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+const char* MenuTitle(bool korean) noexcept {
+    return korean ? u8"로컬 협동 인원수" : "Local Co-op Player Count";
+}
 
 const char* __cdecl SelectLimit(void* data) noexcept;
 
@@ -714,13 +748,17 @@ const char* BuildMenu(unsigned context) noexcept {
     static thread_local char menu[640];
     const auto callback = static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(&SelectLimit));
     const int current = g_effective.load();
-    const char* status = g_reduceBlocked.load() ? u8" / 사용 중인 자리 있음" : "";
-    int used = std::snprintf(menu, sizeof(menu), u8"\"%s (%d명%s)\" { \"_refresh\" \"1\" ", kTitle, current, status);
+    const bool korean = UseKoreanMenu();
+    const char* playerSuffix = korean ? u8"명" : " players";
+    const char* occupiedStatus = korean ? u8" / 사용 중인 자리 있음" : " / Slots occupied";
+    const char* status = g_reduceBlocked.load() ? occupiedStatus : "";
+    int used = std::snprintf(menu, sizeof(menu), "\"%s (%d%s%s)\" { \"_refresh\" \"1\" ",
+                             MenuTitle(korean), current, playerSuffix, status);
     for (int limit = kStockLimit; limit <= static_cast<int>(context & 0xFFu); ++limit) {
         const auto action = (context & ~0xFFu) | static_cast<unsigned>(limit);
         if (used < 0 || static_cast<std::size_t>(used) >= sizeof(menu) - 2) return nullptr;
         const int written = std::snprintf(menu + used, sizeof(menu) - used,
-            u8"\"%d명\" { \"callback\" \"0x%X\" \"user_data\" \"0x%X\" } ", limit, callback, action);
+            "\"%d%s\" { \"callback\" \"0x%X\" \"user_data\" \"0x%X\" } ", limit, playerSuffix, callback, action);
         if (written < 0 || static_cast<std::size_t>(written) >= sizeof(menu) - used) return nullptr;
         used += written;
     }
@@ -745,7 +783,7 @@ const char* __cdecl SelectLimit(void* data) noexcept {
 class Plugin final : public IL4NPlugin {
 public:
     const char* GetName() override { return "NekoLocalCoopSlots"; }
-    const char* GetVersion() override { return "0.1.2-test"; }
+    const char* GetVersion() override { return kPluginVersion; }
 
     void OnGameLaunch() override {
         if (g_starting.exchange(true)) return;
@@ -763,7 +801,7 @@ public:
             if (g_lastMenuVisibility.exchange(visible) != visible) {
                 Log(visible ? "L4N menu title offered to the host." : "L4N menu title hidden outside a hosted campaign.");
             }
-            return context ? kTitle : nullptr;
+            return context ? MenuTitle(UseKoreanMenu()) : nullptr;
         }
         return BuildMenu(context);
     }
