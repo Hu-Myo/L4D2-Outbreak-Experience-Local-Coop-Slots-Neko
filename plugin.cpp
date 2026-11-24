@@ -16,6 +16,8 @@
 #include <cstring>
 #include <cwchar>
 
+#include "game_build.hpp"
+
 #if !defined(_M_IX86)
 #error Use the x86 toolchain for the Source game server modules.
 #endif
@@ -25,19 +27,13 @@ namespace {
 constexpr int kStockLimit = 4;
 constexpr int kLargestLimit = 8;
 constexpr int kSurvivorTeam = 2;
-constexpr char kPluginVersion[] = "0.1.3-test";
+constexpr char kPluginVersion[] = "0.1.4-test";
 
-// RVAs and layouts verified against the three module hashes checked at startup.
-constexpr std::size_t kGameRules = 0x7F7F6C;
-constexpr std::size_t kDirector = 0x83B1B8;
-constexpr std::size_t kGlobals = 0x7F7690;
-constexpr std::size_t kEngineServer = 0x7F7698;
-constexpr std::size_t kGameServer = 0x645558;
+// Instance layouts shared by the verified game builds.
 constexpr std::size_t kServerState = 4;
 constexpr std::size_t kMaxClients = 0x104;
 constexpr std::size_t kDedicated = 0x128;
 constexpr std::size_t kServerSlots = 0x180;
-constexpr std::size_t kMatchFramework = 0x6E0B14;
 constexpr std::size_t kConVarParent = 0x1C;
 constexpr std::size_t kConVarString = 0x24;
 constexpr std::size_t kConVarInt = 0x30;
@@ -57,6 +53,7 @@ using AddSurvivorFn = void(__thiscall*)(void*, int);
 
 std::uint8_t* g_engine = nullptr;
 std::uint8_t* g_server = nullptr;
+const coop_slots::GameBuild* g_build = nullptr;
 FactoryFn g_cvarFactory = nullptr;
 void* g_playerInfoManager = nullptr;
 std::atomic<void*> g_activeRules{nullptr};
@@ -171,27 +168,24 @@ static_assert(CreditsGuestIndex(4, 0b1000) == -1 && CreditsGuestIndex(6, 0) == -
 static_assert(CreditsGuestIndex(-1, 15) == -1 && CreditsGuestIndex(0, 15) == -1 &&
               CreditsGuestIndex(3, 15) == -1 && CreditsGuestIndex(8, 15) == -1);
 
-constexpr std::size_t kCreditsCharacter = 0x286530;
-constexpr std::size_t kCreditsNameToken = 0x286580;
-constexpr std::size_t kCreditsFallbackName = 0x286640;
 using CreditNameFn = const char* (__cdecl*)(int);
 using CreditCharacterFn = int (__cdecl*)(int);
 
 int __cdecl ResolveCreditsCharacter(int character) {
     const int guest = CreditsGuestIndex(character, g_creditsCharacters.load());
-    return guest >= 0 ? guest : reinterpret_cast<CreditCharacterFn>(g_creditsClient + kCreditsCharacter)(character);
+    return guest >= 0 ? guest : reinterpret_cast<CreditCharacterFn>(g_creditsClient + g_build->credits.character)(character);
 }
 
 const char* __cdecl ResolveCreditsName(int character) {
     constexpr const char* tokens[]{"#L4D360UI_Gambler", "#L4D360UI_Producer", "#L4D360UI_Coach", "#L4D360UI_Mechanic"};
     const int guest = CreditsGuestIndex(character, g_creditsCharacters.load());
-    return guest >= 0 ? tokens[guest] : reinterpret_cast<CreditNameFn>(g_creditsClient + kCreditsNameToken)(character);
+    return guest >= 0 ? tokens[guest] : reinterpret_cast<CreditNameFn>(g_creditsClient + g_build->credits.nameToken)(character);
 }
 
 const char* __cdecl ResolveCreditsFallbackName(int character) {
     constexpr const char* names[]{"Nick", "Rochelle", "Coach", "Ellis"};
     const int guest = CreditsGuestIndex(character, g_creditsCharacters.load());
-    return guest >= 0 ? names[guest] : reinterpret_cast<CreditNameFn>(g_creditsClient + kCreditsFallbackName)(character);
+    return guest >= 0 ? names[guest] : reinterpret_cast<CreditNameFn>(g_creditsClient + g_build->credits.fallbackName)(character);
 }
 
 bool WriteCreditsCall(std::size_t call, std::uintptr_t target) {
@@ -215,13 +209,14 @@ bool InstallCreditsNames() {
         std::uintptr_t replacement;
     };
     const auto resolveName = reinterpret_cast<std::uintptr_t>(&ResolveCreditsName);
+    const auto& credits = g_build->credits;
     const Call calls[]{
-        {0x2C1757, kCreditsNameToken, resolveName},
-        {0x2C2BCE, kCreditsNameToken, resolveName},
-        {0x2C2E21, kCreditsNameToken, resolveName},
-        {0x2C31AB, kCreditsNameToken, resolveName},
-        {0x2C3201, kCreditsFallbackName, reinterpret_cast<std::uintptr_t>(&ResolveCreditsFallbackName)},
-        {0x2C3325, kCreditsCharacter, reinterpret_cast<std::uintptr_t>(&ResolveCreditsCharacter)},
+        {credits.nameCalls[0], credits.nameToken, resolveName},
+        {credits.nameCalls[1], credits.nameToken, resolveName},
+        {credits.nameCalls[2], credits.nameToken, resolveName},
+        {credits.nameCalls[3], credits.nameToken, resolveName},
+        {credits.fallbackCall, credits.fallbackName, reinterpret_cast<std::uintptr_t>(&ResolveCreditsFallbackName)},
+        {credits.characterCall, credits.character, reinterpret_cast<std::uintptr_t>(&ResolveCreditsCharacter)},
     };
     for (const auto& call : calls) {
         const auto expected = static_cast<std::uint32_t>(call.original - (call.offset + 5));
@@ -247,7 +242,7 @@ void PrepareCreditsNames() {
     const auto client = GetModuleHandleW(L"client.dll");
     if (!client) return;
     g_creditsAttempted = true;
-    if (MatchesHash(client, "c0a8e1e88f7312db11bcfd4b0ec574d224a34b2d9a615d6088b28335eeb4af1f")) {
+    if (MatchesHash(client, g_build->credits.hash)) {
         g_creditsClient = reinterpret_cast<std::uint8_t*>(client);
         g_creditsInstalled = InstallCreditsNames();
     }
@@ -263,7 +258,7 @@ void* FindConVar(const char* name) {
 }
 
 std::uint8_t* LocalServer() {
-    return g_engine + kGameServer;
+    return g_engine + g_build->engine.localServer;
 }
 
 bool HasLocalServer() {
@@ -281,13 +276,13 @@ bool LobbyRequestsEight(int nativeSlots) {
     if (nativeSlots == kLargestLimit) return true;
     // The engine copies Members/numSlots into the game server. The current
     // session preserves the lobby value when map setup has already reset it.
-    void* framework = Read<void*>(g_engine, kMatchFramework);
+    void* framework = Read<void*>(g_engine, g_build->engine.matchFramework);
     if (!framework) return false;
     using GetObjectFn = void*(__thiscall*)(void*);
     void* session = Method<GetObjectFn>(framework, 9)(framework);
     void* settings = session ? Method<GetObjectFn>(session, 1)(session) : nullptr;
     using GetIntFn = int(__thiscall*)(void*, const char*, int);
-    const auto getInt = reinterpret_cast<GetIntFn>(g_engine + 0x287990);
+    const auto getInt = reinterpret_cast<GetIntFn>(g_engine + g_build->engine.keyValuesGetInt);
     return settings && getInt(settings, "Members/numSlots", 0) == kLargestLimit;
 }
 
@@ -320,11 +315,11 @@ bool IsBot(void* info) {
 
 Survivors GetSurvivors() {
     Survivors team;
-    const auto* globals = Read<void*>(g_server, kGlobals);
+    const auto* globals = Read<void*>(g_server, g_build->server.globals);
     const int maxClients = globals ? Read<int>(globals, 0x14) : 0;
     if (maxClients < kStockLimit || maxClients > 64) return team;
 
-    const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + 0x207270);
+    const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + g_build->server.playerByIndex);
     using UserIdFn = int(__thiscall*)(void*);
     for (int index = 1; index <= maxClients; ++index) {
         const auto* player = byIndex(index);
@@ -379,7 +374,7 @@ bool ApplyLimit(int requested, bool newChapter) {
             return false;
         }
         if (excess > 0) {
-            void* engine = Read<void*>(g_server, kEngineServer);
+            void* engine = Read<void*>(g_server, g_build->server.engineServer);
             if (!engine) return false;
             using CommandFn = void(__thiscall*)(void*, const char*);
             for (int index = 0; index < excess; ++index) {
@@ -428,9 +423,9 @@ bool ApplyLimit(int requested, bool newChapter) {
 
 void PrepareHostedMap() {
     if (!IsCoop()) return;
-    void* rules = Read<void*>(g_server, kGameRules);
-    const auto stockLimit = reinterpret_cast<RulesLimitFn>(g_server + 0x2DB060);
-    const auto* globals = Read<void*>(g_server, kGlobals);
+    void* rules = Read<void*>(g_server, g_build->server.gameRules);
+    const auto stockLimit = reinterpret_cast<RulesLimitFn>(g_server + g_build->server.rulesLimit);
+    const auto* globals = Read<void*>(g_server, g_build->server.globals);
     const int physical = Read<int>(LocalServer(), kMaxClients);
     const int capacity = globals ? Read<int>(globals, 0x14) : 0;
     const int highest = (std::min)(kLargestLimit, (std::min)(physical, capacity));
@@ -448,7 +443,7 @@ void PrepareHostedMap() {
     g_survivorLimit = limit;
     g_map.rules = rules;
     g_map.highest = highest;
-    g_map.survivorSet = reinterpret_cast<int(__cdecl*)()>(g_server + 0x2DBB60)();
+    g_map.survivorSet = reinterpret_cast<int(__cdecl*)()>(g_server + g_build->server.survivorSet)();
     g_map.originalServerSlots = Read<int>(LocalServer(), kServerSlots);
     const bool eightSlotLobby = newSession && LobbyRequestsEight(g_map.originalServerSlots);
     const int initial = eightSlotLobby ? kLargestLimit : g_sessionLimit;
@@ -465,19 +460,19 @@ void PrepareHostedMap() {
 
 int __fastcall RulesLimit(void* self, void*) {
     if (g_activeRules.load() == self) return g_effective.load();
-    return reinterpret_cast<RulesLimitFn>(g_server + 0x2DB060)(self);
+    return reinterpret_cast<RulesLimitFn>(g_server + g_build->server.rulesLimit)(self);
 }
 
 bool __fastcall LevelInit(void* self, void*, const char* map, const char* entities, const char* oldMap,
                           const char* landmark, bool loadGame, bool background) {
-    const bool levelReady = reinterpret_cast<LevelInitFn>(g_server + 0xF21B0)(
+    const bool levelReady = reinterpret_cast<LevelInitFn>(g_server + g_build->server.levelInit)(
         self, map, entities, oldMap, landmark, loadGame, background);
     g_playableLevel = levelReady && !background;
     return levelReady;
 }
 
 void __fastcall ServerActivate(void* self, void*, void* edicts, int count, int maxClients) {
-    reinterpret_cast<ActivateFn>(g_server + 0xEF3D0)(self, edicts, count, maxClients);
+    reinterpret_cast<ActivateFn>(g_server + g_build->server.serverActivate)(self, edicts, count, maxClients);
     g_waitForActivation = g_playableLevel && !Read<bool>(LocalServer(), kDedicated);
 }
 
@@ -509,11 +504,11 @@ void SetExtraCharacter(std::uint64_t newSlots, const Survivors& before) {
     const Character& character = (g_map.survivorSet == 1 ? kSecondGame : kFirstGame)[identity - 4];
     int index = 1;
     for (; (newSlots & 1) == 0; newSlots >>= 1) ++index;
-    const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + 0x207270);
+    const auto byIndex = reinterpret_cast<PlayerByIndexFn>(g_server + g_build->server.playerByIndex);
     void* bot = byIndex(index);
     if (!bot || Read<int>(bot, 0x238) != kSurvivorTeam || Read<int>(bot, 0x4324) > 0 || !IsBot(PlayerInfo(bot))) return;
 
-    void* engine = Read<void*>(g_server, kEngineServer);
+    void* engine = Read<void*>(g_server, g_build->server.engineServer);
     if (!engine) return;
     using IsPrecachedFn = bool(__thiscall*)(void*, const char*);
     using PrecacheFn = int(__thiscall*)(void*, const char*, bool);
@@ -533,8 +528,8 @@ void SetExtraCharacter(std::uint64_t newSlots, const Survivors& before) {
         Write(bot, playerClass, identity + 1);
     }
     Method<SetModelFn>(bot, 27)(bot, character.model);
-    reinterpret_cast<SetCharacterFn>(g_server + 0x3164E0)(bot, identity);
-    reinterpret_cast<SetModelFn>(g_server + 0x63D00)(bot, character.responseContext);
+    reinterpret_cast<SetCharacterFn>(g_server + g_build->server.setCharacter)(bot, identity);
+    reinterpret_cast<SetModelFn>(g_server + g_build->server.setResponseContext)(bot, character.responseContext);
     if (g_map.survivorSet == 1) {
         Method<SetFakeClientValueFn>(engine, 0x15C / sizeof(void*))(engine, Read<void*>(bot, 0x28), "name", character.name);
     }
@@ -557,11 +552,11 @@ void UpdateRoster() {
     auto team = GetSurvivors();
     if (team.count < g_sessionLimit && g_sessionLimit > kStockLimit &&
         team.count >= kStockLimit && HumanConnections() > 0) {
-        void* director = Read<void*>(g_server, kDirector);
+        void* director = Read<void*>(g_server, g_build->server.director);
         if (director) {
             const auto fewest = std::min_element(team.characters.begin(), team.characters.begin() + 4);
             const int character = static_cast<int>(fewest - team.characters.begin());
-            reinterpret_cast<AddSurvivorFn>(g_server + 0x26CC60)(director, character);
+            reinterpret_cast<AddSurvivorFn>(g_server + g_build->server.addSurvivor)(director, character);
             const auto after = GetSurvivors();
             SetExtraCharacter(after.slots & ~team.slots, team);
             team = after;
@@ -576,7 +571,7 @@ void UpdateRoster() {
 }
 
 void __fastcall GameFrame(void* self, void*, bool simulating) {
-    reinterpret_cast<FrameFn>(g_server + 0xEF4B0)(self, simulating);
+    reinterpret_cast<FrameFn>(g_server + g_build->server.gameFrame)(self, simulating);
     if (g_waitForActivation && HasLocalServer()) {
         g_waitForActivation = false;
         PrepareHostedMap();
@@ -619,7 +614,7 @@ void __fastcall GameFrame(void* self, void*, bool simulating) {
 
 void __fastcall LevelShutdown(void* self, void*) {
     StopMap();
-    reinterpret_cast<ShutdownFn>(g_server + 0xEDB40)(self);
+    reinterpret_cast<ShutdownFn>(g_server + g_build->server.levelShutdown)(self);
 }
 
 void __fastcall GameShutdown(void* self, void*) {
@@ -636,7 +631,7 @@ void __fastcall GameShutdown(void* self, void*) {
     g_survivorLimit = nullptr;
     g_sessionLimit = kStockLimit;
     g_effective.store(kStockLimit);
-    reinterpret_cast<ShutdownFn>(g_server + 0xEF2C0)(self);
+    reinterpret_cast<ShutdownFn>(g_server + g_build->server.gameShutdown)(self);
 }
 struct Patch {
     void** slot;
@@ -656,15 +651,15 @@ bool Swap(const Patch& patch, bool install) {
 }
 
 bool InstallHooks() {
-    auto** game = reinterpret_cast<void**>(g_server + 0x60C904);
-    auto** rules = reinterpret_cast<void**>(g_server + 0x68E9D4);
+    auto** game = reinterpret_cast<void**>(g_server + g_build->server.gameVtable);
+    auto** rules = reinterpret_cast<void**>(g_server + g_build->server.rulesVtable);
     const Patch patches[] = {
-        {rules + 136, g_server + 0x2DB060, reinterpret_cast<void*>(&RulesLimit)},
-        {game + 7, g_server + 0xEF2C0, reinterpret_cast<void*>(&GameShutdown)},
-        {game + 6, g_server + 0xEDB40, reinterpret_cast<void*>(&LevelShutdown)},
-        {game + 4, g_server + 0xEF4B0, reinterpret_cast<void*>(&GameFrame)},
-        {game + 3, g_server + 0xEF3D0, reinterpret_cast<void*>(&ServerActivate)},
-        {game + 2, g_server + 0xF21B0, reinterpret_cast<void*>(&LevelInit)},
+        {rules + 136, g_server + g_build->server.rulesLimit, reinterpret_cast<void*>(&RulesLimit)},
+        {game + 7, g_server + g_build->server.gameShutdown, reinterpret_cast<void*>(&GameShutdown)},
+        {game + 6, g_server + g_build->server.levelShutdown, reinterpret_cast<void*>(&LevelShutdown)},
+        {game + 4, g_server + g_build->server.gameFrame, reinterpret_cast<void*>(&GameFrame)},
+        {game + 3, g_server + g_build->server.serverActivate, reinterpret_cast<void*>(&ServerActivate)},
+        {game + 2, g_server + g_build->server.levelInit, reinterpret_cast<void*>(&LevelInit)},
     };
     for (const auto& patch : patches) {
         if (*patch.slot != patch.original) return false;
@@ -677,14 +672,21 @@ bool InstallHooks() {
     return true;
 }
 
+const coop_slots::GameBuild* FindGameBuild(HMODULE engine, HMODULE server) {
+    for (const auto* build : {&coop_slots::kSteam26770911, &coop_slots::kPreviousBuild}) {
+        if (MatchesHash(engine, build->engine.hash) && MatchesHash(server, build->server.hash)) return build;
+    }
+    return nullptr;
+}
+
 DWORD WINAPI Start(void*) {
     for (int attempt = 0; attempt < 1200; ++attempt) {
         const auto engine = GetModuleHandleW(L"engine.dll");
         const auto server = GetModuleHandleW(L"server.dll");
         const auto cvar = GetModuleHandleW(L"vstdlib.dll");
         if (engine && server && cvar) {
-            if (!MatchesHash(engine, "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86") ||
-                !MatchesHash(server, "a93ec916a8f26fbea85688c321d2ba8dd346d435fab09a0b926dd950c2e1ea12") ||
+            g_build = FindGameBuild(engine, server);
+            if (!g_build ||
                 !MatchesHash(cvar, "37d0c98ddfe7fa199d741dfc24526eb435f71f66d2d0e3d0500c4c1be33cb6c5")) {
                 Log("Module hash mismatch. Kept stock game behavior.");
                 return 0;
@@ -696,8 +698,11 @@ DWORD WINAPI Start(void*) {
 #pragma warning(suppress : 4191)
             const auto serverFactory = reinterpret_cast<FactoryFn>(GetProcAddress(server, "CreateInterface"));
             g_playerInfoManager = serverFactory ? serverFactory("PlayerInfoManager002", nullptr) : nullptr;
-            Log(g_cvarFactory && g_playerInfoManager && InstallHooks() ? "Waiting for a locally hosted campaign." :
-                                                                       "Engine entry points did not match.");
+            if (g_cvarFactory && g_playerInfoManager && InstallHooks()) {
+                Log("%s recognized. Waiting for a locally hosted campaign.", g_build->name);
+            } else {
+                Log("Engine entry points did not match.");
+            }
             return 0;
         }
         Sleep(50);

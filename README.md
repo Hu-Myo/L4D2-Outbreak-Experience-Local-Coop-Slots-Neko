@@ -4,7 +4,9 @@
 
 Change the survivor limit from four to eight in a Left 4 Dead 2 co-op campaign you host. The plugin adds a player-count menu to Neko and fills empty survivor slots with bots.
 
-**[Download 0.1.3-test](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.3-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.3-test.zip)**
+**[Download 0.1.4-test](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.4-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.4-test.zip)**
+
+The Windows plugin supports Steam build `26770911`, installed on November 25, 2026, Korea time, and the previous verified game build. Both report game version `2.2.4.3`.
 
 > **Account and server restriction notice:** This DLL modifies the game at runtime. The author cannot guarantee that using it will not result in game/server restrictions or account bans. To the extent permitted by law, the author accepts no responsibility for such penalties. Use it only if you accept these risks of restrictions or bans.
 
@@ -12,13 +14,13 @@ Change the survivor limit from four to eight in a Left 4 Dead 2 co-op campaign y
 
 ## Install and use
 
-1. Install [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615) using the author's instructions. This build was tested with Windows L4D2 2.2.4.3 and Left4Neko 2.51.0.
+1. Install [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615) using the author's instructions. Use Left4Neko 2.51.0 with a supported Windows game build.
 2. Close the game. Extract the release ZIP and place `NekoLocalCoopSlots.dll` at `<Left 4 Dead 2>/bin/neko/plugins/NekoLocalCoopSlots.dll`. Back up any existing copy before replacing it.
 3. Host a local co-op campaign. After the map loads, enter `l4n_menu` in the game console. Open **L4N Plugins**, select **Local Co-op Player Count**, and choose four to eight survivors. If the game language is Korean, this menu is labeled **로컬 협동 인원수**. All other game languages use the English labels.
 
 ### Optional teammate HUD
 
-Install the [Extra Survivor HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test) alongside this plugin to show portraits and health bars for the additional teammates.
+Install the [Extra Survivor HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test) alongside this plugin to show portraits and health bars for the additional teammates. The HUD also needs to support your installed game build.
 
 ## What changes in a campaign
 

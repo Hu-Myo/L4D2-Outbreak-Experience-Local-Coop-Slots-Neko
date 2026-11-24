@@ -4,7 +4,9 @@
 
 직접 호스트한 레프트 4 데드 2 로컬 협동 캠페인의 생존자 정원을 4~8명으로 조절하는 Neko 플러그인입니다. 빈 생존자 자리는 봇이 채웁니다.
 
-**[0.1.3-test 다운로드](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.3-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.3-test.zip)**
+**[0.1.4-test 다운로드](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko/releases/download/v0.1.4-test/L4D2-Outbreak-Experience-Local-Coop-Slots-Neko_0.1.4-test.zip)**
+
+Windows용 플러그인은 한국 시간 2026년 11월 25일에 설치된 Steam 빌드 `26770911`과 이전에 확인한 게임 빌드를 지원합니다. 두 빌드 모두 게임 버전은 `2.2.4.3`으로 표시됩니다.
 
 > **이용 제한·계정 정지 안내:** 이 DLL은 게임 실행 중 동작을 변경합니다. 사용으로 인해 게임·서버 이용 제한이나 계정 정지가 발생하지 않는다고 보장할 수 없습니다. 관련 법률이 허용하는 범위에서 제작자는 이러한 제재에 대해 책임지지 않습니다. 이러한 이용 제한·계정 정지 위험을 이해한 뒤 본인의 판단으로 사용해 주세요.
 
@@ -12,13 +14,13 @@
 
 ## 설치 및 사용
 
-1. 제작자 안내에 따라 [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615)을 설치합니다. 이 빌드는 Windows판 L4D2 2.2.4.3과 Left4Neko 2.51.0에서 테스트했습니다.
+1. 제작자 안내에 따라 [NekoShaders & L4N](https://steamcommunity.com/sharedfiles/filedetails/?id=3558049615)을 설치합니다. 지원되는 Windows 게임 빌드에서 Left4Neko 2.51.0을 사용합니다.
 2. 게임을 종료합니다. 릴리스 ZIP을 풀고 `NekoLocalCoopSlots.dll`을 `<Left 4 Dead 2>/bin/neko/plugins/NekoLocalCoopSlots.dll`에 넣습니다. 기존 DLL이 있으면 교체 전에 백업합니다.
 3. 로컬 협동 캠페인을 직접 호스트합니다. 맵이 로드되면 콘솔에 `l4n_menu`를 입력하고 **L4N 플러그인**에서 인원수 메뉴를 열어 4~8명 중 하나를 선택합니다. 게임 언어가 한국어일 때는 **로컬 협동 인원수**, 그 외에는 **Local Co-op Player Count**로 표시됩니다.
 
 ### 선택 사항 · 추가 생존자 HUD
 
-[추가 생존자 HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test)도 함께 설치하면 인원수를 늘렸을 때 추가된 팀원의 초상화와 체력 바를 HUD에 표시할 수 있습니다.
+[추가 생존자 HUD](https://github.com/Hu-Myo/L4D2-Outbreak-Experience-HUD-Neko/releases/tag/v0.1.27-test)도 함께 설치하면 인원수를 늘렸을 때 추가된 팀원의 초상화와 체력 바를 HUD에 표시할 수 있습니다. 현재 설치된 게임 빌드를 지원하는 HUD 버전이 필요합니다.
 
 ## 캠페인에서 달라지는 점
 
