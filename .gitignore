@@ -1,0 +1,13 @@
+/build/
+/dist/
+/.vs/
+/sdk/l4n_plugin.h
+*.dll
+*.exe
+*.exp
+*.lib
+*.log
+*.obj
+*.pdb
+*.vpk
+*.zip

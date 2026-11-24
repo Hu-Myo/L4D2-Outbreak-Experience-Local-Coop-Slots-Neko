@@ -1,0 +1,3 @@
+LIBRARY NekoLocalCoopSlots
+EXPORTS
+    GetL4NPluginInstance
